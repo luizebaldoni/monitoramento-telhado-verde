@@ -35,3 +35,41 @@ O sistema é uma solução completa para **coleta, armazenamento e visualizaçã
 ---
 
 ## Arquitetura de Software
+```mermaid
+---
+config:
+  layout: fixed
+---
+flowchart TD
+    E["**Views.py**"] -- **Show data graphs** --> A["**Frontend: Dashboard Web**"]
+    B["**API: Django Backend**"] -- **Validating and processing** --> C["**Models.py**"]
+    C -- **Save and recover** --> D[("**Firebase**")]
+    D -- **Search and show** --> C
+    B -- **Send POST** --> E
+    F["**Hardware: ESP32**"] -- **Converted and packed** --> H["**Json File**"]
+    H -- **Send data_sensors** --> B
+    G["**Sensors**"] -- **Analog or digital Sinal** --> F
+     E:::Backend
+     A:::Frontend
+     B:::Backend
+     C:::Backend
+     D:::Banco
+     F:::Hardware
+     H:::Aqua
+     G:::Hardware
+    classDef Backend fill:#f9f,stroke:#333,stroke-width:2px
+    classDef Frontend fill:#ccf,stroke:#333,stroke-width:2px
+    classDef Banco fill:#FFD580,stroke:#333,stroke-width:2px
+    classDef Hardware fill:#FFE0B2, color:#000000
+    classDef Aqua stroke-width:1px, stroke-dasharray:none, stroke:#46EDC8, fill:#DEFFF8, color:#378E7A
+    style E color:#000000
+    style A color:#000000 
+    style B color:#000000
+    style C color:#000000
+    style D color:#000000
+    style F color:#000000
+    style H color:#000000
+    style G stroke:#000000,color:#000000
+```
+---
+## Funcionalidades
