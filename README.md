@@ -1,10 +1,10 @@
 # Sistema de Monitoramento: Telhado Verde Jardim Botânico UFSM
 
-Este repositório contém o código e a documentação do **Sistema de Monitoramento do Telhado Verde do Jardim Botânico da UFSM**. O projeto foi desenvolvido na disciplina de Projeto Integrador em Engenharia de Computação, em parceria com o Grupo de Pesquisas em Modelagem HidroAmbiental e Ecotecnologias da UFSM.
+Este repositório reúne o código-fonte e a documentação do **Sistema de Monitoramento do Telhado Verde do Jardim Botânico da UFSM**. O projeto foi desenvolvido na disciplina de Projeto Integrador em Engenharia de Computação, em parceria com o Grupo de Pesquisas em Modelagem HidroAmbiental e Ecotecnologias da UFSM.
 
 ---
 
-## Tecnologias
+## Tecnologias Utilizadas
 
 ![Django](https://img.shields.io/badge/Django-092E20?style=for-the-badge&logo=django&logoColor=white)
 ![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)
@@ -12,58 +12,56 @@ Este repositório contém o código e a documentação do **Sistema de Monitoram
 ![ESP32](https://img.shields.io/badge/ESP32-E7352C?style=for-the-badge&logo=espressif&logoColor=white)
 ![C++](https://img.shields.io/badge/C%2B%2B-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)
 
-| Componente | Tecnologias                                                         |
-|------------|---------------------------------------------------------------------|
-| Backend    | API Python, Firebase|
-| Firmware   | C++ (Arduino Core), ESP32                                           |
-| Frontend   | HTML5, CSS, JavaScript, Chart.js (para gráficos de histórico)           |
-| Sensores   | DS18B20, DHT-11, HCSR04, HL-69 |
-| Hardware final | PCB + case |
+| Componente      | Tecnologias / Componentes                                                                 |
+|-----------------|------------------------------------------------------------------------------------------|
+| Backend         | Django (Python), API REST, Firebase                                                      |
+| Firmware        | C++ (Arduino Core), ESP32                                                                |
+| Frontend        | HTML5, CSS, JavaScript, Chart.js (gráficos)                                              |
+| Sensores        | HL-69 (umidade do solo), DS18B20 (temp. solo), DHT11 (temp./umidade ar), Pluviômetro, HCSR04 (nível d'água) |
+| Hardware final  | ESP32, sensores, PCB, case, alimentação elétrica                                         |
 
 ---
 
 ## Visão Geral do Sistema
 
-O sistema é uma solução completa para **coleta, armazenamento e visualização de dados em tempo real**. Ele é dividido em três grandes módulos:
+O sistema realiza **coleta, transmissão, armazenamento e visualização de dados ambientais em tempo real**. Ele é composto por três módulos principais:
 
-1. **Hardware & Firmware**: Sensores e microcontrolador ESP32 para coleta de dados.
-
-2. **Backend & Cloud**: Uma API em Python para processamento de dados e o Firebase para armazenamento.
-
-3. **Dashboard & Visualização**: Interface de usuário para visualizar os dados de forma clara e intuitiva.
+1. **Hardware & Firmware**: ESP32 e sensores para coleta e envio dos dados ambientais.
+2. **Backend & Cloud**: API em Django para processamento e armazenamento dos dados (Firebase).
+3. **Dashboard & Visualização**: Interface web para visualização dos dados históricos e em tempo real.
 
 ---
 
-## Arquitetura de Software
+## Arquitetura do Sistema
 ```mermaid
 ---
 config:
   layout: fixed
 ---
 flowchart TD
-    E["**Views.py**"] -- **Show data graphs** --> A["**Frontend: Dashboard Web**"]
-    B["**API: Django Backend**"] -- **Validating and processing** --> C["**Models.py**"]
-    C -- **Save and recover** --> D[("**Firebase**")]
-    D -- **Search and show** --> C
-    B -- **Send POST** --> E
-    F["**Hardware: ESP32**"] -- **Converted and packed** --> H["**Json File**"]
-    H -- **Send data_sensors** --> B
-    G["**Sensors**"] -- **Analog or digital Sinal** --> F
-     E:::Backend
-     A:::Frontend
-     B:::Backend
-     C:::Backend
-     D:::Banco
-     F:::Hardware
-     H:::Aqua
-     G:::Hardware
+    G["**Sensores**"] -- **Sinal analógico/digital** --> F["**Hardware: ESP32**"]
+    F -- **Conversão e empacotamento** --> H["**Arquivo JSON**"]
+    H -- **Envia dados_sensores via WiFi** --> B["**API: Django Backend**"]
+    B -- **Validação e processamento** --> C["**Models.py**"]
+    C -- **Salvar/Recuperar** --> D[("**Firebase**")]
+    D -- **Consulta/Exibição** --> C
+    B -- **POST** --> E["**Views.py**"]
+    E -- **Exibe gráficos** --> A["**Frontend: Dashboard Web**"]
+    E:::Backend
+    A:::Frontend
+    B:::Backend
+    C:::Backend
+    D:::Banco
+    F:::Hardware
+    H:::Aqua
+    G:::Hardware
     classDef Backend fill:#f9f,stroke:#333,stroke-width:2px
     classDef Frontend fill:#ccf,stroke:#333,stroke-width:2px
     classDef Banco fill:#FFD580,stroke:#333,stroke-width:2px
     classDef Hardware fill:#FFE0B2, color:#000000
     classDef Aqua stroke-width:1px, stroke-dasharray:none, stroke:#46EDC8, fill:#DEFFF8, color:#378E7A
     style E color:#000000
-    style A color:#000000 
+    style A color:#000000
     style B color:#000000
     style C color:#000000
     style D color:#000000
@@ -72,4 +70,36 @@ flowchart TD
     style G stroke:#000000,color:#000000
 ```
 ---
+
 ## Funcionalidades
+
+- Coleta automática de dados ambientais (solo e ar)
+- Envio dos dados via WiFi (JSON) para o backend
+- Armazenamento seguro e histórico dos dados (Firebase)
+- Visualização em tempo real e gráficos históricos via dashboard web
+- Interface administrativa para gerenciamento do sistema
+- Modularidade para inclusão de novos sensores ou funcionalidades
+
+---
+
+## Sensores Utilizados
+
+- **HL-69** — Umidade do solo
+- **DS18B20** — Temperatura do solo
+- **DHT11** — Temperatura e umidade do ar
+- **Pluviômetro** — Captação de chuva
+- **HCSR04** — Sensor ultrassônico para nível d'água nos reservatórios
+
+---
+
+## Licença
+
+Este projeto é reservado aos autores e não possui licença aberta de uso ou distribuição.
+
+---
+
+## Créditos e Contato
+
+Desenvolvido por alunos de Engenharia de Computação da UFSM, em parceria com o Grupo de Pesquisas em Modelagem HidroAmbiental e Ecotecnologias.
+
+Dúvidas ou interesse em colaboração? Entre em contato com os autores do projeto.
