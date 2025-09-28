@@ -21,6 +21,14 @@ Este repositório reúne o código-fonte e a documentação do **Sistema de Moni
 | Hardware final  | ESP32, sensores, PCB, case, alimentação elétrica                                         |
 
 ---
+## Estrutura do Projeto
+
+- [`/Data Visualization/`](./Data%20Visualization/README.md) — Software: Backend, frontend e dashboard (Django)
+- [`/hardware/`](./hardware/README.md) — Hardware: esquemas, sensores e firmware do ESP32
+
+Cada pasta possui um README próprio com instruções e detalhes específicos.
+
+---
 
 ## Visão Geral do Sistema
 
@@ -103,3 +111,5 @@ Este projeto é reservado aos autores e não possui licença aberta de uso ou di
 Desenvolvido por alunos de Engenharia de Computação da UFSM, em parceria com o Grupo de Pesquisas em Modelagem HidroAmbiental e Ecotecnologias.
 
 Dúvidas ou interesse em colaboração? Entre em contato com os autores do projeto.
+
+---
