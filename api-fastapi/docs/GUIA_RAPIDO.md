@@ -1,8 +1,4 @@
-# ⚡ Guia Rápido de Início
-
-> Para membros da equipe que querem começar rapidamente
-
-## 🚀 Setup em 5 Minutos
+# ⚡ Guia Rápido
 
 ### 1️⃣ Clone e Entre na Pasta
 ```bash
