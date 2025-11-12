@@ -1,0 +1,2 @@
+# Esta pasta deve conter o arquivo firebase-credentials.json
+# O arquivo NÃO deve ser commitado (está no .gitignore)
