@@ -1,0 +1,168 @@
+# ========================================
+# ARQUIVOS DE AMBIENTE E CONFIGURAÇÃO
+# ========================================
+.env
+.env.local
+.env.*.local
+*.env.backup
+
+# Credenciais e configurações sensíveis
+config/firebase-credentials.json
+config/*.json
+!config/.gitkeep
+*.json.bak
+firebase-credentials*.json
+serviceAccountKey*.json
+
+# ========================================
+# PYTHON
+# ========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribuição / Empacotamento
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ========================================
+# AMBIENTES VIRTUAIS
+# ========================================
+venv/
+ENV/
+env/
+.venv
+.virtualenv
+env.bak/
+venv.bak/
+
+# ========================================
+# IDEs E EDITORES
+# ========================================
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Outros
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ========================================
+# JUPYTER NOTEBOOK
+# ========================================
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# ========================================
+# LOGS E DADOS
+# ========================================
+*.log
+logs/
+*.log.*
+log/
+
+# ========================================
+# ARQUIVOS TEMPORÁRIOS
+# ========================================
+*.tmp
+*.temp
+.cache/
+tmp/
+temp/
+
+# ========================================
+# TESTES E COBERTURA
+# ========================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+nosetests.xml
+
+# ========================================
+# BANCO DE DADOS LOCAL
+# ========================================
+*.db
+*.sqlite
+*.sqlite3
+
+# ========================================
+# BACKUP E ARQUIVOS ANTIGOS
+# ========================================
+*.backup
+*.bak
+*.old
+*_OLD
+*_old
+*.orig
+
+# ========================================
+# DEPENDÊNCIAS
+# ========================================
+node_modules/
+.npm
+.yarn/
+
+# ========================================
+# DOCUMENTAÇÃO GERADA
+# ========================================
+site/
+.mkdocs_cache/
+
+# ========================================
+# SISTEMA OPERACIONAL
+# ========================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ========================================
+# ESPECÍFICO DO PROJETO
+# ========================================
+README.md.old
+*_OLD.*
+dados_teste/
