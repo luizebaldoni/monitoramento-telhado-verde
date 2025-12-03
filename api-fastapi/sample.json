@@ -1,0 +1,11 @@
+{
+  "device_id": "ESP32_TELHADO_VERDE",
+  "timestamp": "2025-12-03T14:30:00",
+  "sensors": {
+    "ds18b20": { "temperature": 24.5, "unit": "celsius", "status": "ok" },
+    "dht11": { "temperature": 24.7, "humidity": 55.0, "unit_temp": "celsius", "unit_humidity": "percent", "status": "ok" },
+    "hcsr04": { "distance": 12.5, "unit": "cm", "status": "ok" },
+    "hl69": { "soil_moisture": 42.0, "raw_value": 2100, "unit": "percent", "status": "ok" }
+  }
+}
+

@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 import plotly.express as px
+import requests
 
 
 # Configuração da página
@@ -121,14 +122,14 @@ def get_db():
     try:
         if not firebase_admin._apps:
             cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH", "config/firebase-credentials.json")
-            
+
             if not os.path.exists(cred_path):
                 st.error(f"❌ Arquivo de credenciais não encontrado: {cred_path}")
                 st.stop()
-            
+
             cred = credentials.Certificate(cred_path)
             firebase_admin.initialize_app(cred)
-        
+
         db = firestore.client()
         return db
     except Exception as e:
@@ -136,38 +137,74 @@ def get_db():
         st.stop()
 
 
-def ver_dados(db, limit: int = 100, device_id: str = None):
-    """Busca dados do Firebase"""
+# NEW: Fetch data via API client
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
+USE_API = os.getenv("USE_API", "0") in ["1", "true", "True", "TRUE"]
+
+
+def fetch_via_api(limit: int = 100, device_id: str = None):
+    """Busca dados chamando o endpoint FastAPI /sensor-data"""
+    try:
+        params = {"limit": limit}
+        if device_id and device_id != "Todos":
+            params["device_id"] = device_id
+        url = f"{API_URL.rstrip('/')}/sensor-data"
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        payload = resp.json()
+        # FastAPI retorna um dicionário com chave 'dados'
+        return payload.get("dados", [])
+    except Exception as e:
+        st.error(f"❌ Erro ao consultar API ({API_URL}): {str(e)}")
+        return []
+
+
+# keep existing ver_dados but rename to fetch_firestore_data for clarity
+
+
+def fetch_firestore_data(db, limit: int = 100, device_id: str = None):
+    """Busca dados do Firebase (fallback)"""
     try:
         query = db.collection('sensor_readings')
-        
+
         if device_id and device_id != "Todos":
             query = query.where('device_id', '==', device_id)
-        
+
         docs = query.order_by('timestamp_recebido', direction=firestore.Query.DESCENDING).limit(limit).stream()
-        
+
         resultados = []
         for doc in docs:
             dados = doc.to_dict()
             dados['id'] = doc.id
             resultados.append(dados)
-        
+
         return resultados
     except Exception as e:
         st.error(f"❌ Erro ao consultar Firebase: {str(e)}")
         return []
 
 
+# Adjust get_device_ids to optionally fetch from API
+
 def get_device_ids(db):
     """Obtém lista de device IDs disponíveis"""
     try:
-        docs = db.collection('sensor_readings').limit(100).stream()
-        device_ids = set()
-        for doc in docs:
-            dados = doc.to_dict()
-            if 'device_id' in dados:
-                device_ids.add(dados['device_id'])
-        return sorted(list(device_ids))
+        if USE_API:
+            # attempt to get device ids via API by requesting a small set
+            docs = fetch_via_api(limit=100)
+            device_ids = set()
+            for entry in docs:
+                if 'device_id' in entry:
+                    device_ids.add(entry['device_id'])
+            return sorted(list(device_ids))
+        else:
+            docs = db.collection('sensor_readings').limit(100).stream()
+            device_ids = set()
+            for doc in docs:
+                dados = doc.to_dict()
+                if 'device_id' in dados:
+                    device_ids.add(dados['device_id'])
+            return sorted(list(device_ids))
     except Exception as e:
         st.error(f"Erro ao buscar device IDs: {str(e)}")
         return []
@@ -350,9 +387,11 @@ def main():
             st.cache_resource.clear()
             st.rerun()
     
-    # Conecta ao Firebase
-    db = get_db()
-    
+    # Conecta ao Firebase apenas se necessário (fallback)
+    db = None
+    if not USE_API:
+        db = get_db()
+
     # Filtros
     st.markdown("---")
     filter_col1, filter_col2, filter_col3 = st.columns([3, 2, 2])
@@ -376,12 +415,15 @@ def main():
     # Busca dados
     with st.spinner("🔄 Carregando dados..."):
         device_param = None if selected_device == "Todos" else selected_device
-        dados = ver_dados(db, limit=data_limit, device_id=device_param)
-        
+        if USE_API:
+            dados = fetch_via_api(limit=data_limit, device_id=device_param)
+        else:
+            dados = fetch_firestore_data(db, limit=data_limit, device_id=device_param)
+
         if not dados:
             st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados.")
             st.stop()
-        
+
         df = parse_dados_to_dataframe(dados)
     
     # Última leitura

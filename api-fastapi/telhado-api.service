@@ -1,0 +1,14 @@
+[Unit]
+Description=Telhado Verde API
+After=network.target
+
+[Service]
+User=www-data
+WorkingDirectory=/srv/monitoramento-telhado-verde/api-fastapi
+ExecStart=/srv/monitoramento-telhado-verde/api-fastapi/.venv/bin/uvicorn api_firebase:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

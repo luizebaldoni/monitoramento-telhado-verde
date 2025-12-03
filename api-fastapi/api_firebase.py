@@ -64,7 +64,6 @@ class SensorDHT11(BaseModel):
     unit_humidity: str = "percent"
     status: str = "ok"
 
-
 class SensorHCSR04(BaseModel):
     """
     Modelo para sensor ultrassônico HC-SR04
