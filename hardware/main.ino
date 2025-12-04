@@ -1,346 +1,705 @@
 /*
 
- * LEITURA DE SENSORES PARA TELHADO VERDE INTELIGENTE
+ * ENVIO DE DADOS DE SENSORES DO TELHADO VERDE PARA API FASTAPI (ESP32)
 
- * Autor: Equipe de Hardware - Grupo 5 Projeto Integrador em Engenharia de Computação
- * Data final: 03/12/2025
+ * Autor: equipe de hardware Grupo 5 Projeto Integrador em Engenharia de Computação
+*  Engenharia de Computação – UFSM
+* Contato: grupo5.projeto.telhado.verde@gmail.com
+ * Data de conclusao: 03/12/2025
+ *
  * DESCRIÇÃO:
- * - Código para leitura integrada de múltiplos sensores em um sistema de telhado verde inteligente.
- * - Realiza a leitura de:
- *   - 3 sensores DS18B20 (temperatura do ar) em barramento OneWire.
- *   - 1 sensor DHT11 (temperatura e umidade do ar).
- *   - 1 sensor ultrassônico HC-SR04 (distância/nível).
- *   - 1 sensor de umidade do solo HL-69 (via entrada analógica, com calibração seco/molhado).
- * - Exibe no monitor serial as leituras em formato legível, incluindo checagem de erro e mapeamento em porcentagem para o HL-69.
+ * - Código para leitura de múltiplos sensores conectados a um ESP32 em um sistema de telhado verde inteligente.
+ * - Coleta dados de:
+ *   - DS18B20: temperatura do solo via barramento OneWire.
+ *   - DHT11: temperatura e umidade do ar.
+ *   - HC-SR04: distância (ex.: nível de reservatório ou altura da lâmina d’água).
+ *   - HL-69: umidade do solo em forma de porcentagem a partir de leitura analógica.
+ * - Obtém o horário atual via NTP (servidor pool.ntp.org) para gerar timestamp no formato ISO 8601.
+ * - Monta um JSON com os dados dos sensores e metadados do dispositivo e envia via HTTP POST
+ *   para uma API FastAPI exposta por Nginx na rota /api-fast/sensor-data.
  *
  * REQUISITOS:
  * - Hardware:
- *   - Placa compatível com Arduino com suporte a GPIO digitais e analógicos (ex.: ESP32, Arduino UNO/Mega com ajustes de pinos).
- *   - 3 sensores DS18B20 ligados em barramento OneWire com resistor de pull-up adequado (geralmente 4k7).
- *   - 1 sensor DHT11 conectado ao pino digital configurado (DHTPIN).
- *   - 1 sensor ultrassônico HC-SR04 (pinos TRIG e ECHO).
- *   - 1 sensor de umidade do solo HL-69 conectado a uma entrada analógica.
- *   - Fonte de alimentação compatível com os sensores e a placa (5 V ou 3,3 V conforme especificação de cada módulo).
+ *   - Placa ESP32 com Wi-Fi integrado.
+ *   - Sensor DS18B20 (temperatura do solo) com resistor de pull-up adequado no barramento OneWire. [web:21][web:22]
+ *   - Sensor DHT11 (temperatura/umidade do ar).
+ *   - Sensor ultrassônico HC-SR04 (pinos TRIG/ECHO compatíveis com ESP32).
+ *   - Sensor de umidade do solo HL-69 conectado a entrada analógica (HL69_PIN).
+ *   - Fonte de alimentação estável compatível com o ESP32 e todos os sensores.
  * - Software:
- *   - Arduino IDE ou plataforma compatível para compilação e gravação do código.
+ *   - Arduino IDE (ou plataforma compatível) com suporte para ESP32 configurado.
  *   - Bibliotecas instaladas:
- *     - OneWire (comunicação 1-Wire com DS18B20). [web:3][web:11][web:14]
- *     - DallasTemperature (leitura de múltiplos DS18B20 por endereço). [web:6][web:9][web:18]
- *     - DHT (leitura de temperatura e umidade do sensor DHT11). [web:4][web:17][web:20]
- *   - Configuração correta da porta serial (115200 baud) para visualização dos dados.
+ *     - WiFi.h e HTTPClient.h para conexão de rede e requisições HTTP. [web:22][web:27][web:38]
+ *     - ArduinoJson para montagem e serialização do objeto JSON enviado na requisição POST. [web:21][web:23][web:32]
+ *     - OneWire e DallasTemperature para comunicação e leitura do sensor DS18B20. [web:21]
+ *     - DHT (Adafruit DHT) para leitura de temperatura e umidade do DHT11.
+ *     - NTPClient e WiFiUdp para sincronização de horário com servidor NTP e obtenção de epoch time. [web:26][web:28][web:30]
+ *   - Servidor de backend com FastAPI publicado atrás de Nginx, aceitando requisições HTTP POST em:
+ *     - URL base configurada em SERVER_URL (ex.: http://10.5.1.100/api-fast/sensor-data), com corpo JSON compatível com o esperado pela API.
  * - Observações:
- *   - Os valores HL69_DRY_RAW e HL69_WET_RAW devem ser ajustados por calibração prática (solo seco e solo úmido) para cada montagem. [web:7][web:10][web:16]
- *   - O tempo de leitura é controlado por millis(), com intervalo definido em READ_INTERVAL_MS para evitar leituras excessivas e melhorar a estabilidade das medições. [web:1][web:5]
+ *   - As credenciais de Wi-Fi (ssid e password) devem ser configuradas antes da gravação no dispositivo.
+ *   - Os valores HL69_DRY_RAW e HL69_WET_RAW precisam ser ajustados por calibração prática em solo seco e úmido
+ *     para que o cálculo de porcentagem de umidade represente corretamente a condição real. [web:10][web:13][web:31]
+ *   - O intervalo de envio de dados é definido em READ_INTERVAL_MS (30 segundos), evitando requisições excessivas
+ *     e reduzindo consumo de energia e carga no servidor.
 
  */
 
 
 /////// INCLUSÃO DE BIBLIOTECAS //////
 
-#include <OneWire.h>           // Comunicação 1-Wire (DS18B20)
-#include <DallasTemperature.h> // Biblioteca de alto nível para DS18B20
-#include <DHT.h>               // Biblioteca para sensor DHT (DHT11)
-#include <WiFi.h>              // Biblioteca WiFi
-#include <NTPClient.h>         // Biblioteca NTP Client
-#include <ArduinoJson.h>       // Biblioteca ArduinoJson
-#include <HTTPClient.h>        // Biblioteca HTTP Client
-#include <ArduinoOTA.h>        // Biblioteca Arduino OTA
+#include <WiFi.h>          // Gerenciamento de conexão Wi-Fi no ESP32
+#include <HTTPClient.h>    // Cliente HTTP para requisições GET/POST
+#include <ArduinoJson.h>   // Montagem e serialização de JSON
+#include <OneWire.h>       // Protocolo OneWire (DS18B20)
+#include <DallasTemperature.h> // Leitura de sensores DS18B20
+#include "DHT.h"           // Biblioteca para sensor DHT (DHT11)
+#include <NTPClient.h>     // Cliente NTP para horário de rede
+#include <WiFiUdp.h>       // UDP para comunicação com servidor NTP
 
-////// DEFINIÇÕES DE PINOS //////
 
-#define ONE_WIRE_BUS 18  // Pino de dados do barramento OneWire (DS18B20)
-#define DHTPIN 4         // Pino de dados do DHT11
-#define DHTTYPE DHT11    // Tipo de sensor DHT utilizado
-#define TRIG_PIN 34      // Pino TRIG do HC-SR04
-#define ECHO_PIN 26      // Pino ECHO do HC-SR04
-#define HL69_PIN 5       // Pino analógico para leitura do HL-69 (umidade do solo)
-#define MAX_DS 3        // Número máximo de sensores DS18B20 tratados
+/////// CONFIGURAÇÕES DE REDE //////
 
-////// CRIAÇÃO DE OBJETOS DOS SENSORES //////
+//& SSID e senha da rede Wi-Fi à qual o ESP32 deve se conectar
+const char* ssid     = "SSID";        // <-- TROCAR: nome da rede Wi-Fi
+const char* password = "PASSWORD";   // <-- TROCAR: senha da rede Wi-Fi
 
-OneWire oneWire(ONE_WIRE_BUS);          // Instância do barramento OneWire
-DallasTemperature sensors(&oneWire);    // Gerenciador dos sensores DS18B20
-DHT dht(DHTPIN, DHTTYPE);               // Objeto para o sensor DHT11
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "br.pool.ntp.org", -3 * 3600);  // UTC-3 (Brasília)
+//& URL da API FastAPI acessada via Nginx (rota /api-fast/sensor-data)
+const char* SERVER_URL = "http://10.5.1.100/api-fast/sensor-data";
 
-////// VARIAVEIS GLOBAIS //////
-//& Variáveis para controle de intervalo entre leituras
-unsigned long lastRead = 0;                 // Armazena o instante da última leitura
-const unsigned long READ_INTERVAL_MS = 2000; // Intervalo entre leituras em ms (2 s)
-
-//& Valores de calibração do sensor HL-69 (ajustar conforme necessário)
-int HL69_DRY_RAW = 3000;  // Valor analógico aproximado para solo seco (ajustar via calibração)
-int HL69_WET_RAW = 1200;  // Valor analógico aproximado para solo úmido (ajustar via calibração)
-
-///& Armazenamento dos endereços dos sensores DS18B20
-DeviceAddress dsAddr[MAX_DS];         // Vetor para armazenar os endereços dos sensores
-uint8_t dsCount = 0;                  // Quantidade efetiva de sensores detectados
-
-//& Credenciais Wi-Fi
-const char* ssid = "SEU_SSID";        // SSID da rede Wi-Fi à qual o ESP8266 se conectará
-const char* password = "SUA_SENHA";           // Senha da rede Wi-Fi
-
-//& URL do servidor API (substitua pelo IP ou domínio do seu Ubuntu Server)
-const char* SERVER_URL = "http://192.168.1.100:8000/sensor-data"; // <-- ajuste aqui
+//& Identificador lógico deste dispositivo (usado no JSON enviado)
 const char* DEVICE_ID = "ESP32_TELHADO_VERDE";
 
-////// FUNÇÕES AUXILIARES //////
 
-//& Imprime no monitor serial o endereço 1-Wire (8 bytes em HEX) de um DS18B20
-void printAddress(const DeviceAddress addr) {
-  for (uint8_t i = 0; i < 8; i++) {
-    if (addr[i] < 16) Serial.print("0");
-    Serial.print(addr[i], HEX);
-  }
+/////// CONFIGURAÇÃO NTP (DATA/HORA) //////
+
+//& Cliente UDP e cliente NTP para obter horário atual (UTC-3) de pool.ntp.org
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", -3 * 3600, 60 * 1000); // Fuso UTC-3, atualiza a cada 60 s
+
+//& Converte epoch time (segundos desde 1970) em string no formato ISO 8601 (YYYY-MM-DDTHH:MM:SS)
+String formatIsoTimestamp(unsigned long epoch) {
+  struct tm timeinfo;
+  gmtime_r((time_t*)&epoch, &timeinfo);
+  char buffer[25];
+  strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", &timeinfo);
+  return String(buffer);
 }
 
-//& Compara se dois endereços 1-Wire são idênticos
-bool sameAddr(const DeviceAddress a, const DeviceAddress b) {
-  for (int i = 0; i < 8; i++) if (a[i] != b[i]) return false;
-  return true;
-}
 
-//& Converte leitura bruta do HL-69 para porcentagem de umidade (0–100 %)
-static float mapPercent(int raw, int rawDry, int rawWet) {
-  if (rawDry == rawWet) return 0;
-  float pct = (float)(raw - rawDry) / (float)(rawWet - rawDry) * 100.0f;
+/////// CONFIGURAÇÃO DOS SENSORES //////
+
+//& DS18B20 – sensor de temperatura do solo via OneWire
+#define ONE_WIRE_BUS  2
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature ds18b20(&oneWire);
+DeviceAddress dsAddr;         // Endereço do primeiro sensor DS18B20
+float last_ds_temp = NAN;     // Armazena última leitura válida (opcional)
+
+//& DHT11 – sensor de temperatura e umidade do ar
+#define DHTPIN 4
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+//& HC-SR04 – sensor ultrassônico de distância
+#define TRIG_PIN 12
+#define ECHO_PIN 14
+
+//& HL-69 – sensor resistivo de umidade do solo (saída analógica)
+#define HL69_PIN  34
+// Valores de calibração (ajustar conforme medições em solo seco e solo úmido)
+#define HL69_DRY_RAW  3500   // valor analógico aproximado solo seco
+#define HL69_WET_RAW  1200   // valor analógico aproximado solo molhado
+
+
+//& Converte leitura analógica bruta do HL-69 em porcentagem de umidade (0–100 %)
+float mapPercent(int raw, int dryRaw, int wetRaw) {
+  float pct = (float)(dryRaw - raw) * 100.0 / (float)(dryRaw - wetRaw);
   if (pct < 0) pct = 0;
   if (pct > 100) pct = 100;
   return pct;
 }
 
-//& Retorna um nome padrão para cada DS18B20, com base no índice
-const char* defaultName(uint8_t i) {
-  static const char* N[MAX_DS] = {"DS_A", "DS_B", "DS_C"};
-  return (i < MAX_DS) ? N[i] : "DS_X";
-}
 
-// NEW: helper to format ISO8601 timestamp from NTPClient epoch
-String formatIsoTimestamp(unsigned long epoch) {
-  // epoch from NTPClient already has timezone offset applied if configured
-  time_t t = (time_t)epoch;
-  struct tm tminfo;
-  gmtime_r(&t, &tminfo); // safe on ESP32
-  char buf[32];
-  snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d",
-           tminfo.tm_year + 1900,
-           tminfo.tm_mon + 1,
-           tminfo.tm_mday,
-           tminfo.tm_hour,
-           tminfo.tm_min,
-           tminfo.tm_sec);
-  return String(buf);
-}
+/////// FUNÇÃO DE ENVIO DE DADOS PARA API //////
 
-// NEW: Send JSON payload to FastAPI endpoint
-bool sendSensorData(const char* url, const char* device_id, const String &timestamp_iso,
-                    float ds_temp, float dht_temp, float dht_hum, float hcsr_dist,
-                    int hl_raw, float hl_pct) {
+//& Monta o JSON com leituras de sensores e envia via HTTP POST para a API configurada
+bool sendSensorData(
+  const char* serverUrl,
+  const char* deviceId,
+  const String& timestamp,
+  float ds_temp,
+  float dht_temp,
+  float dht_hum,
+  float hcsr_dist,
+  int hl_raw,
+  float hl_pct
+) {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi não conectado. Tentando reconectar...");
-    WiFi.begin(ssid, password);
-    unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
-      delay(200);
-    }
-    if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("Falha ao conectar WiFi para envio.");
-      return false;
-    }
+    Serial.println("WiFi não conectado, não foi possível enviar.");
+    return false;
   }
 
   HTTPClient http;
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
+  http.begin(serverUrl);
+  http.addHeader("Content-Type", "application/json"); // cabeçalho para JSON
 
-  // Prepare JSON using ArduinoJson
+  //& Documento JSON no formato esperado pela API (ex.: modelo DadosSensor)
   StaticJsonDocument<1024> doc;
-  doc["device_id"] = device_id;
-  doc["timestamp"] = timestamp_iso;
+
+  doc["device_id"] = deviceId;
+  doc["timestamp"] = timestamp;
+
   JsonObject sensors = doc.createNestedObject("sensors");
 
-  JsonObject ds = sensors.createNestedObject("ds18b20");
-  ds["temperature"] = ds_temp;
-  ds["unit"] = "celsius";
-  ds["status"] = (ds_temp == DEVICE_DISCONNECTED_C) ? "error" : "ok";
+  //& Bloco de dados do sensor DS18B20
+  JsonObject ds18 = sensors.createNestedObject("ds18b20");
+  ds18["temperature"] = isnan(ds_temp) ? 0.0 : ds_temp;   // não envia null
+  ds18["unit"] = "celsius";
+  ds18["status"] = isnan(ds_temp) ? "error" : "ok";
 
+  //& Bloco de dados do sensor DHT11
   JsonObject dht = sensors.createNestedObject("dht11");
-  dht["temperature"] = dht_temp;
-  dht["humidity"] = dht_hum;
+  dht["temperature"] = isnan(dht_temp) ? 0.0 : dht_temp;  // não envia null
+  dht["humidity"]   = isnan(dht_hum)  ? 0.0 : dht_hum;    // não envia null
   dht["unit_temp"] = "celsius";
   dht["unit_humidity"] = "percent";
   dht["status"] = (isnan(dht_temp) || isnan(dht_hum)) ? "error" : "ok";
 
+  //& Bloco de dados do sensor HC-SR04
   JsonObject hcsr = sensors.createNestedObject("hcsr04");
   hcsr["distance"] = hcsr_dist;
   hcsr["unit"] = "cm";
   hcsr["status"] = (hcsr_dist <= 0) ? "error" : "ok";
 
+  //& Bloco de dados do sensor HL-69
   JsonObject hl = sensors.createNestedObject("hl69");
   hl["soil_moisture"] = hl_pct;
   hl["raw_value"] = hl_raw;
   hl["unit"] = "percent";
   hl["status"] = "ok";
 
+  //& Serializa o documento JSON para string a ser enviada no corpo da requisição
   String payload;
   serializeJson(doc, payload);
 
-  int httpCode = http.POST(payload);
+  Serial.println("Enviando para API:");
+  Serial.println(payload);
+
+  int httpCode = http.POST(payload); // envia POST com corpo JSON
+
   if (httpCode > 0) {
-    Serial.print("HTTP POST code: "); Serial.println(httpCode);
+    Serial.print("HTTP POST code: ");
+    Serial.println(httpCode);
     String resp = http.getString();
-    Serial.print("Resposta: "); Serial.println(resp);
+    Serial.print("Resposta: ");
+    Serial.println(resp);
     http.end();
-    return (httpCode >= 200 && httpCode < 300);
+    return (httpCode >= 200 && httpCode < 300); // considera sucesso códigos 2xx
   } else {
-    Serial.print("Falha POST: "); Serial.println(http.errorToString(httpCode));
+    Serial.print("Falha POST: ");
+    Serial.println(http.errorToString(httpCode));
     http.end();
     return false;
   }
 }
 
 
-////// FUNÇÃO DE CONFIGURAÇÃO //////
+/////// CONFIGURAÇÕES INICIAIS //////
+
+unsigned long lastRead = 0;                         // último instante de leitura
+const unsigned long READ_INTERVAL_MS = 30 * 1000;   // intervalo entre leituras (30 s)
+
 
 void setup() {
-  Serial.begin(115200);  // Inicializa comunicação serial
+  Serial.begin(115200);
   delay(200);
 
-  // NEW: Conecta Wi-Fi
-  Serial.print("Conectando em WiFi: "); Serial.println(ssid);
+  //& Conexão Wi-Fi
+  Serial.print("Conectando em WiFi: ");
+  Serial.println(ssid);
   WiFi.begin(ssid, password);
   unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
-    delay(250);
-    Serial.print('.');
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
+    delay(500);
+    Serial.print(".");
   }
+  Serial.println();
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println();
-    Serial.print("WiFi conectado. IP: "); Serial.println(WiFi.localIP());
+    Serial.print("WiFi conectado. IP: ");
+    Serial.println(WiFi.localIP());
   } else {
-    Serial.println();
-    Serial.println("Aviso: não foi possível conectar ao WiFi no setup.");
+    Serial.println("AVISO: não conectou ao WiFi no tempo limite.");
   }
 
-  // NEW: Inicializa NTP client
+  //& Inicialização do cliente NTP para obter data/hora de rede
   timeClient.begin();
   timeClient.update();
 
-  //& Inicialização dos sensores DS18B20 no barramento OneWire
-  sensors.begin();
-  dsCount = sensors.getDeviceCount();     // Lê quantidade de dispositivos 1-Wire detectados
-  if (dsCount > MAX_DS) dsCount = MAX_DS; // Limita ao máximo definido
-
-  Serial.print("DS18B20 encontrados no barramento: ");
-  Serial.println(sensors.getDeviceCount());
-  if (dsCount == 0) {
-    Serial.println("ATENCAO: nenhum DS18B20 detectado!");
+  //& Inicialização do sensor DS18B20
+  ds18b20.begin();
+  if (ds18b20.getAddress(dsAddr, 0)) {
+    ds18b20.setResolution(dsAddr, 12);  // resolução máxima (12 bits)
+    Serial.println("DS18B20 inicializado.");
   } else {
-    //& Obtém e armazena os primeiros endereços válidos detectados
-    uint8_t filled = 0;
-    DeviceAddress tmp;
-    for (uint8_t idx = 0; filled < dsCount && sensors.getAddress(tmp, filled); filled++) {
-      memcpy(dsAddr[filled], tmp, 8);
-    }
-    dsCount = filled;
-
-    //& Mostra os endereços dos sensores DS18B20 encontrados
-    for (uint8_t i = 0; i < dsCount; i++) {
-      Serial.print("Sensor "); Serial.print(defaultName(i)); Serial.print(" -> 0x");
-      printAddress(dsAddr[i]); Serial.println();
-    }
-
-    //& Ajusta opcionalmente a resolução dos DS18B20 para 12 bits (maior precisão, conversão mais lenta)
-    if (sensors.getResolution() != 12) sensors.setResolution(12);
+    Serial.println("ATENÇÃO: nenhum DS18B20 encontrado.");
   }
 
-  //& Inicialização do sensor DHT11 (temperatura e umidade do ar)
+  //& Inicialização do sensor DHT11
   dht.begin();
-  Serial.println("DHT11 inicializado no GPIO4.");
+  Serial.println("DHT11 inicializado.");
 
-  //& Configuração dos pinos do sensor ultrassônico HC-SR04
+  //& Configuração dos pinos do HC-SR04
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   Serial.println("HC-SR04 inicializado.");
 
-  //& Configuração do sensor de umidade do solo HL-69
+  //& Configuração do sensor HL-69
   pinMode(HL69_PIN, INPUT);
 #ifdef ARDUINO_ARCH_ESP32
-  analogSetPinAttenuation(HL69_PIN, ADC_11db);  // Ajusta a atenuação do ADC no ESP32 para melhor faixa de leitura
+  analogSetPinAttenuation(HL69_PIN, ADC_11db);  // melhora faixa de leitura no ADC do ESP32
 #endif
-  Serial.println("HL-69 inicializado (GPIO5).");
+  Serial.println("HL-69 inicializado.");
 }
 
 
-////// FUNÇÃO PRINCIPAL //////
+/////// LOOP PRINCIPAL //////
 
 void loop() {
   unsigned long now = millis();
-  if (now - lastRead < READ_INTERVAL_MS) return; //& Garante intervalo mínimo entre leituras
+  if (now - lastRead < READ_INTERVAL_MS) return;  // respeita intervalo entre amostragens
   lastRead = now;
 
-  //& Limpa visualmente o monitor serial com linhas em branco
-  for (int i = 0; i < 10; i++) Serial.println();
+  Serial.println();
+  Serial.println("===== NOVA LEITURA =====");
 
-///// LEITURA DOS SENSORES DS18B20 (POR ENDEREÇO) /////
-  sensors.requestTemperatures(); // Solicita conversão de temperatura a todos os DS18B20
-  float last_ds_temp = DEVICE_DISCONNECTED_C;
-  for (uint8_t i = 0; i < dsCount; i++) {
-    float t = sensors.getTempC(dsAddr[i]);              // Lê temperatura em °C do endereço correspondente
-    bool ok = (t != DEVICE_DISCONNECTED_C);             // Verifica se o sensor respondeu corretamente
-
-    const char* nome = nullptr;
-    if (!nome) nome = defaultName(i);                   // Nome padrão para identificação do sensor
-
-    if (ok) {
-      Serial.print(nome); Serial.print("  Temp: ");
-      Serial.print(t, 2); Serial.println(" °C");
-      last_ds_temp = t;
+  //& Leitura DS18B20 (temperatura do solo)
+  ds18b20.requestTemperatures();
+  float ds_temp = NAN;
+  if (ds18b20.getAddress(dsAddr, 0)) {
+    ds_temp = ds18b20.getTempC(dsAddr);
+    if (ds_temp != DEVICE_DISCONNECTED_C) {
+      Serial.print("DS18B20 Temp solo: ");
+      Serial.print(ds_temp);
+      Serial.println(" °C");
     } else {
-      Serial.print(nome); Serial.println("  ERRO (-127 °C) — confira fiação/pull-up.");
-      Serial.print("Endereço 0x"); printAddress(dsAddr[i]); Serial.println();
+      Serial.println("DS18B20 ERRO (-127 °C)");
     }
   }
 
- ///// LEITURA DO SENSOR DHT11 /////
-  float hum  = dht.readHumidity();       // Umidade relativa do ar em %
-  float tDHT = dht.readTemperature();    // Temperatura do ar em °C
-  bool dht_ok = !(isnan(hum) || isnan(tDHT));
-  if (dht_ok) {
-    Serial.print("DHT11    Temp: "); Serial.print(tDHT, 2);
-    Serial.print(" °C  |  Umid: "); Serial.print(hum, 1); Serial.println(" %");
+  //& Leitura DHT11 (temperatura e umidade do ar)
+  float hum  = dht.readHumidity();
+  float tDHT = dht.readTemperature();
+  if (!isnan(hum) && !isnan(tDHT)) {
+    Serial.print("DHT11 Temp ar: ");
+    Serial.print(tDHT);
+    Serial.print(" °C | Umidade: ");
+    Serial.print(hum);
+    Serial.println(" %");
   } else {
-    Serial.println("DHT11    Falha de leitura.");
+    Serial.println("DHT11 falha de leitura.");
   }
 
- /////LEITURA DO SENSOR ULTRASSÔNICO HC-SR04 /////
-  digitalWrite(TRIG_PIN, HIGH); delayMicroseconds(10);
+  //& Leitura HC-SR04 (distância em cm)
   digitalWrite(TRIG_PIN, LOW);
-  long duration = pulseIn(ECHO_PIN, HIGH, 30000); // Tempo do eco em microssegundos (timeout 30 ms)
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000); // timeout 30 ms para eco
   float distance = -1;
   if (duration == 0) {
-    Serial.println("HC-SR04  Falha de leitura (sem eco).");
+    Serial.println("HC-SR04 falha (sem eco).");
   } else {
-    distance = duration * 0.0343f / 2.0f;   // Conversão tempo->distância em cm (velocidade do som aproximada)
-    Serial.print("HC-SR04  Dist: "); Serial.print(distance, 1); Serial.println(" cm");
+    distance = duration * 0.0343f / 2.0f;  // conversão para cm
+    Serial.print("HC-SR04 Dist: ");
+    Serial.print(distance);
+    Serial.println(" cm");
   }
 
-  ///// LEITURA DO SENSOR DE UMIDADE DO SOLO HL-69 /////
-  int hl_raw = analogRead(HL69_PIN);                         // Valor analógico bruto do HL-69
-  float soil_pct = mapPercent(hl_raw, HL69_DRY_RAW, HL69_WET_RAW); // Converte para porcentagem (0–100 %)
-  Serial.print("HL-69    Bruto: "); Serial.print(hl_raw);
-  Serial.print("  |  Solo: "); Serial.print(soil_pct, 1); Serial.println(" %");
+  //& Leitura HL-69 (umidade do solo)
+  int hl_raw = analogRead(HL69_PIN);                             // valor analógico bruto
+  float soil_pct = mapPercent(hl_raw, HL69_DRY_RAW, HL69_WET_RAW); // umidade em %
+  Serial.print("HL-69 Bruto: ");
+  Serial.print(hl_raw);
+  Serial.print(" | Solo: ");
+  Serial.print(soil_pct);
+  Serial.println(" %");
 
-  // NEW: Atualiza NTP e monta timestamp ISO
+  //& Obtém timestamp atual via NTP e formata em ISO 8601
   timeClient.update();
   String ts = formatIsoTimestamp(timeClient.getEpochTime());
-  Serial.print("Timestamp ISO: "); Serial.println(ts);
+  Serial.print("Timestamp ISO: ");
+  Serial.println(ts);
 
-  // NEW: Envia dados para API
-  bool sent = sendSensorData(SERVER_URL, DEVICE_ID, ts,
-                             last_ds_temp, tDHT, hum, distance,
-                             hl_raw, soil_pct);
+  //& Envia os dados coletados para a API FastAPI via HTTP POST
+  bool sent = sendSensorData(
+    SERVER_URL,
+    DEVICE_ID,
+    ts,
+    ds_temp,
+    tDHT,
+    hum,
+    distance,
+    hl_raw,
+    soil_pct
+  );
+
+  if (sent) {
+    Serial.println("Dados enviados com sucesso para a API.");
+  } else {
+    Serial.println("Falha ao enviar dados para a API.");
+  }
+}
+/*
+
+ * ENVIO DE DADOS DE SENSORES DO TELHADO VERDE PARA API FASTAPI (ESP32)
+
+ * Autor: equipe de hardware Grupo 5 Projeto Integrador em Engenharia de Computação
+*  Engenharia de Computação – UFSM
+* Contato: grupo5.projeto.telhado.verde@gmail.com
+ * Data de conclusao: 03/12/2025
+ *
+ * DESCRIÇÃO:
+ * - Código para leitura de múltiplos sensores conectados a um ESP32 em um sistema de telhado verde inteligente.
+ * - Coleta dados de:
+ *   - DS18B20: temperatura do solo via barramento OneWire.
+ *   - DHT11: temperatura e umidade do ar.
+ *   - HC-SR04: distância (ex.: nível de reservatório ou altura da lâmina d’água).
+ *   - HL-69: umidade do solo em forma de porcentagem a partir de leitura analógica.
+ * - Obtém o horário atual via NTP (servidor pool.ntp.org) para gerar timestamp no formato ISO 8601.
+ * - Monta um JSON com os dados dos sensores e metadados do dispositivo e envia via HTTP POST
+ *   para uma API FastAPI exposta por Nginx na rota /api-fast/sensor-data.
+ *
+ * REQUISITOS:
+ * - Hardware:
+ *   - Placa ESP32 com Wi-Fi integrado.
+ *   - Sensor DS18B20 (temperatura do solo) com resistor de pull-up adequado no barramento OneWire. [web:21][web:22]
+ *   - Sensor DHT11 (temperatura/umidade do ar).
+ *   - Sensor ultrassônico HC-SR04 (pinos TRIG/ECHO compatíveis com ESP32).
+ *   - Sensor de umidade do solo HL-69 conectado a entrada analógica (HL69_PIN).
+ *   - Fonte de alimentação estável compatível com o ESP32 e todos os sensores.
+ * - Software:
+ *   - Arduino IDE (ou plataforma compatível) com suporte para ESP32 configurado.
+ *   - Bibliotecas instaladas:
+ *     - WiFi.h e HTTPClient.h para conexão de rede e requisições HTTP. [web:22][web:27][web:38]
+ *     - ArduinoJson para montagem e serialização do objeto JSON enviado na requisição POST. [web:21][web:23][web:32]
+ *     - OneWire e DallasTemperature para comunicação e leitura do sensor DS18B20. [web:21]
+ *     - DHT (Adafruit DHT) para leitura de temperatura e umidade do DHT11.
+ *     - NTPClient e WiFiUdp para sincronização de horário com servidor NTP e obtenção de epoch time. [web:26][web:28][web:30]
+ *   - Servidor de backend com FastAPI publicado atrás de Nginx, aceitando requisições HTTP POST em:
+ *     - URL base configurada em SERVER_URL (ex.: http://10.5.1.100/api-fast/sensor-data), com corpo JSON compatível com o esperado pela API.
+ * - Observações:
+ *   - As credenciais de Wi-Fi (ssid e password) devem ser configuradas antes da gravação no dispositivo.
+ *   - Os valores HL69_DRY_RAW e HL69_WET_RAW precisam ser ajustados por calibração prática em solo seco e úmido
+ *     para que o cálculo de porcentagem de umidade represente corretamente a condição real. [web:10][web:13][web:31]
+ *   - O intervalo de envio de dados é definido em READ_INTERVAL_MS (30 segundos), evitando requisições excessivas
+ *     e reduzindo consumo de energia e carga no servidor.
+
+ */
+
+
+/////// INCLUSÃO DE BIBLIOTECAS //////
+
+#include <WiFi.h>          // Gerenciamento de conexão Wi-Fi no ESP32
+#include <HTTPClient.h>    // Cliente HTTP para requisições GET/POST
+#include <ArduinoJson.h>   // Montagem e serialização de JSON
+#include <OneWire.h>       // Protocolo OneWire (DS18B20)
+#include <DallasTemperature.h> // Leitura de sensores DS18B20
+#include "DHT.h"           // Biblioteca para sensor DHT (DHT11)
+#include <NTPClient.h>     // Cliente NTP para horário de rede
+#include <WiFiUdp.h>       // UDP para comunicação com servidor NTP
+
+
+/////// CONFIGURAÇÕES DE REDE //////
+
+//& SSID e senha da rede Wi-Fi à qual o ESP32 deve se conectar
+const char* ssid     = "SSID";        // <-- TROCAR: nome da rede Wi-Fi
+const char* password = "PASSWORD";   // <-- TROCAR: senha da rede Wi-Fi
+
+//& URL da API FastAPI acessada via Nginx (rota /api-fast/sensor-data)
+const char* SERVER_URL = "http://10.5.1.100/api-fast/sensor-data";
+
+//& Identificador lógico deste dispositivo (usado no JSON enviado)
+const char* DEVICE_ID = "ESP32_TELHADO_VERDE";
+
+
+/////// CONFIGURAÇÃO NTP (DATA/HORA) //////
+
+//& Cliente UDP e cliente NTP para obter horário atual (UTC-3) de pool.ntp.org
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", -3 * 3600, 60 * 1000); // Fuso UTC-3, atualiza a cada 60 s
+
+//& Converte epoch time (segundos desde 1970) em string no formato ISO 8601 (YYYY-MM-DDTHH:MM:SS)
+String formatIsoTimestamp(unsigned long epoch) {
+  struct tm timeinfo;
+  gmtime_r((time_t*)&epoch, &timeinfo);
+  char buffer[25];
+  strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", &timeinfo);
+  return String(buffer);
+}
+
+
+/////// CONFIGURAÇÃO DOS SENSORES //////
+
+//& DS18B20 – sensor de temperatura do solo via OneWire
+#define ONE_WIRE_BUS  2
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature ds18b20(&oneWire);
+DeviceAddress dsAddr;         // Endereço do primeiro sensor DS18B20
+float last_ds_temp = NAN;     // Armazena última leitura válida (opcional)
+
+//& DHT11 – sensor de temperatura e umidade do ar
+#define DHTPIN 4
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+//& HC-SR04 – sensor ultrassônico de distância
+#define TRIG_PIN 12
+#define ECHO_PIN 14
+
+//& HL-69 – sensor resistivo de umidade do solo (saída analógica)
+#define HL69_PIN  34
+// Valores de calibração (ajustar conforme medições em solo seco e solo úmido)
+#define HL69_DRY_RAW  3500   // valor analógico aproximado solo seco
+#define HL69_WET_RAW  1200   // valor analógico aproximado solo molhado
+
+
+//& Converte leitura analógica bruta do HL-69 em porcentagem de umidade (0–100 %)
+float mapPercent(int raw, int dryRaw, int wetRaw) {
+  float pct = (float)(dryRaw - raw) * 100.0 / (float)(dryRaw - wetRaw);
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  return pct;
+}
+
+
+/////// FUNÇÃO DE ENVIO DE DADOS PARA API //////
+
+//& Monta o JSON com leituras de sensores e envia via HTTP POST para a API configurada
+bool sendSensorData(
+  const char* serverUrl,
+  const char* deviceId,
+  const String& timestamp,
+  float ds_temp,
+  float dht_temp,
+  float dht_hum,
+  float hcsr_dist,
+  int hl_raw,
+  float hl_pct
+) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi não conectado, não foi possível enviar.");
+    return false;
+  }
+
+  HTTPClient http;
+  http.begin(serverUrl);
+  http.addHeader("Content-Type", "application/json"); // cabeçalho para JSON
+
+  //& Documento JSON no formato esperado pela API (ex.: modelo DadosSensor)
+  StaticJsonDocument<1024> doc;
+
+  doc["device_id"] = deviceId;
+  doc["timestamp"] = timestamp;
+
+  JsonObject sensors = doc.createNestedObject("sensors");
+
+  //& Bloco de dados do sensor DS18B20
+  JsonObject ds18 = sensors.createNestedObject("ds18b20");
+  ds18["temperature"] = isnan(ds_temp) ? 0.0 : ds_temp;   // não envia null
+  ds18["unit"] = "celsius";
+  ds18["status"] = isnan(ds_temp) ? "error" : "ok";
+
+  //& Bloco de dados do sensor DHT11
+  JsonObject dht = sensors.createNestedObject("dht11");
+  dht["temperature"] = isnan(dht_temp) ? 0.0 : dht_temp;  // não envia null
+  dht["humidity"]   = isnan(dht_hum)  ? 0.0 : dht_hum;    // não envia null
+  dht["unit_temp"] = "celsius";
+  dht["unit_humidity"] = "percent";
+  dht["status"] = (isnan(dht_temp) || isnan(dht_hum)) ? "error" : "ok";
+
+  //& Bloco de dados do sensor HC-SR04
+  JsonObject hcsr = sensors.createNestedObject("hcsr04");
+  hcsr["distance"] = hcsr_dist;
+  hcsr["unit"] = "cm";
+  hcsr["status"] = (hcsr_dist <= 0) ? "error" : "ok";
+
+  //& Bloco de dados do sensor HL-69
+  JsonObject hl = sensors.createNestedObject("hl69");
+  hl["soil_moisture"] = hl_pct;
+  hl["raw_value"] = hl_raw;
+  hl["unit"] = "percent";
+  hl["status"] = "ok";
+
+  //& Serializa o documento JSON para string a ser enviada no corpo da requisição
+  String payload;
+  serializeJson(doc, payload);
+
+  Serial.println("Enviando para API:");
+  Serial.println(payload);
+
+  int httpCode = http.POST(payload); // envia POST com corpo JSON
+
+  if (httpCode > 0) {
+    Serial.print("HTTP POST code: ");
+    Serial.println(httpCode);
+    String resp = http.getString();
+    Serial.print("Resposta: ");
+    Serial.println(resp);
+    http.end();
+    return (httpCode >= 200 && httpCode < 300); // considera sucesso códigos 2xx
+  } else {
+    Serial.print("Falha POST: ");
+    Serial.println(http.errorToString(httpCode));
+    http.end();
+    return false;
+  }
+}
+
+
+/////// CONFIGURAÇÕES INICIAIS //////
+
+unsigned long lastRead = 0;                         // último instante de leitura
+const unsigned long READ_INTERVAL_MS = 30 * 1000;   // intervalo entre leituras (30 s)
+
+
+void setup() {
+  Serial.begin(115200);
+  delay(200);
+
+  //& Conexão Wi-Fi
+  Serial.print("Conectando em WiFi: ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("WiFi conectado. IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("AVISO: não conectou ao WiFi no tempo limite.");
+  }
+
+  //& Inicialização do cliente NTP para obter data/hora de rede
+  timeClient.begin();
+  timeClient.update();
+
+  //& Inicialização do sensor DS18B20
+  ds18b20.begin();
+  if (ds18b20.getAddress(dsAddr, 0)) {
+    ds18b20.setResolution(dsAddr, 12);  // resolução máxima (12 bits)
+    Serial.println("DS18B20 inicializado.");
+  } else {
+    Serial.println("ATENÇÃO: nenhum DS18B20 encontrado.");
+  }
+
+  //& Inicialização do sensor DHT11
+  dht.begin();
+  Serial.println("DHT11 inicializado.");
+
+  //& Configuração dos pinos do HC-SR04
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  Serial.println("HC-SR04 inicializado.");
+
+  //& Configuração do sensor HL-69
+  pinMode(HL69_PIN, INPUT);
+#ifdef ARDUINO_ARCH_ESP32
+  analogSetPinAttenuation(HL69_PIN, ADC_11db);  // melhora faixa de leitura no ADC do ESP32
+#endif
+  Serial.println("HL-69 inicializado.");
+}
+
+
+/////// LOOP PRINCIPAL //////
+
+void loop() {
+  unsigned long now = millis();
+  if (now - lastRead < READ_INTERVAL_MS) return;  // respeita intervalo entre amostragens
+  lastRead = now;
+
+  Serial.println();
+  Serial.println("===== NOVA LEITURA =====");
+
+  //& Leitura DS18B20 (temperatura do solo)
+  ds18b20.requestTemperatures();
+  float ds_temp = NAN;
+  if (ds18b20.getAddress(dsAddr, 0)) {
+    ds_temp = ds18b20.getTempC(dsAddr);
+    if (ds_temp != DEVICE_DISCONNECTED_C) {
+      Serial.print("DS18B20 Temp solo: ");
+      Serial.print(ds_temp);
+      Serial.println(" °C");
+    } else {
+      Serial.println("DS18B20 ERRO (-127 °C)");
+    }
+  }
+
+  //& Leitura DHT11 (temperatura e umidade do ar)
+  float hum  = dht.readHumidity();
+  float tDHT = dht.readTemperature();
+  if (!isnan(hum) && !isnan(tDHT)) {
+    Serial.print("DHT11 Temp ar: ");
+    Serial.print(tDHT);
+    Serial.print(" °C | Umidade: ");
+    Serial.print(hum);
+    Serial.println(" %");
+  } else {
+    Serial.println("DHT11 falha de leitura.");
+  }
+
+  //& Leitura HC-SR04 (distância em cm)
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000); // timeout 30 ms para eco
+  float distance = -1;
+  if (duration == 0) {
+    Serial.println("HC-SR04 falha (sem eco).");
+  } else {
+    distance = duration * 0.0343f / 2.0f;  // conversão para cm
+    Serial.print("HC-SR04 Dist: ");
+    Serial.print(distance);
+    Serial.println(" cm");
+  }
+
+  //& Leitura HL-69 (umidade do solo)
+  int hl_raw = analogRead(HL69_PIN);                             // valor analógico bruto
+  float soil_pct = mapPercent(hl_raw, HL69_DRY_RAW, HL69_WET_RAW); // umidade em %
+  Serial.print("HL-69 Bruto: ");
+  Serial.print(hl_raw);
+  Serial.print(" | Solo: ");
+  Serial.print(soil_pct);
+  Serial.println(" %");
+
+  //& Obtém timestamp atual via NTP e formata em ISO 8601
+  timeClient.update();
+  String ts = formatIsoTimestamp(timeClient.getEpochTime());
+  Serial.print("Timestamp ISO: ");
+  Serial.println(ts);
+
+  //& Envia os dados coletados para a API FastAPI via HTTP POST
+  bool sent = sendSensorData(
+    SERVER_URL,
+    DEVICE_ID,
+    ts,
+    ds_temp,
+    tDHT,
+    hum,
+    distance,
+    hl_raw,
+    soil_pct
+  );
+
   if (sent) {
     Serial.println("Dados enviados com sucesso para a API.");
   } else {
